@@ -1,0 +1,68 @@
+# Training configuration for the California housing regressor.
+#
+# This file is the single source of truth for anything you'd otherwise have
+# to edit Python code to change: which MLflow experiment/registry names are
+# used, how the train/test split is drawn, which model families are tried,
+# and what hyperparameters GridSearchCV searches over.
+#
+# The trainer (src/housing_ml/train.py) and the API (api/main.py) both read
+# `registry_name` from here, so there is exactly one place that can drift
+# out of sync -- this file. (The old project had the trainer register under
+# "housing-regression" while the API looked for "housing-regressor", which
+# meant the API could never find a model. That class of bug is what this
+# config centralization is meant to prevent.)
+
+experiment_name: california-housing-regression
+registry_name: housing-regression
+
+# Where the MLflow tracking server lives. Overridable at runtime via the
+# MLFLOW_TRACKING_URI environment variable (see config.py) so docker-compose
+# can point this at the "mlflow" service by name without editing this file.
+mlflow_tracking_uri: http://mlflow:5000
+
+data:
+  raw_path: data/raw/california_housing.csv
+  target: MedHouseVal
+  test_size: 0.2
+  random_state: 4
+
+# Cross-validation settings shared by every model's GridSearchCV.
+cv_folds: 3
+scoring: neg_root_mean_squared_error
+
+# After picking the best model (lowest test RMSE), its registered version is
+# a *candidate* for promotion through these aliases, in order. A serving
+# client can point at "prod" and always get the latest promoted model
+# without knowing the version number.
+#
+# Promotion is gated, not automatic: for each alias, the candidate is only
+# promoted if it beats (per promotion_metric/lower_is_better below) whatever
+# model is currently aliased there. If an alias has nothing registered yet,
+# the first candidate always takes it. This is what stops a noisy or
+# unlucky training run from silently regressing prod.
+promote_aliases: [dev, uat, prod]
+promotion_metric: test_rmse
+lower_is_better: true
+
+# One entry per model family to try. `estimator` must match a key registered
+# in src/housing_ml/models.py:ESTIMATOR_FACTORIES. `param_grid` is passed
+# straight through to sklearn's GridSearchCV, so keys must use the
+# "step_name__param_name" pipeline convention.
+models:
+  ridge:
+    estimator: ridge
+    param_grid:
+      model__alpha: [0.01, 0.1, 1.0, 5.0, 10.0, 100.0]
+
+  random_forest:
+    estimator: random_forest
+    param_grid:
+      model__n_estimators: [100, 200]
+      model__max_depth: [8, 12, null]
+
+  gradient_boosting:
+    estimator: gradient_boosting
+    param_grid:
+      model__n_estimators: [100, 200]
+      model__learning_rate: [0.05, 0.1]
+      model__max_depth: [3, 4]

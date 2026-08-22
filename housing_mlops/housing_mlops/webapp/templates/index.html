@@ -1,0 +1,29 @@
+<title>Housing Price Estimator</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 480px; margin: 2rem auto; }
+  label { display: block; margin-top: 0.75rem; font-size: 0.9rem; }
+  input { width: 8rem; padding: 0.3rem; box-sizing: border-box; }
+  button { margin-top: 1.25rem; padding: 0.5rem 1rem; }
+  .result { margin-top: 1.5rem; padding: 1rem; background: #eef7ee; border-radius: 6px; }
+  .error { margin-top: 1.5rem; padding: 1rem; background: #fdeaea; border-radius: 6px; color: #a33; }
+  .hint { color: #666; font-size: 0.8rem; }
+</style>
+
+<h1>California Housing Price Estimator</h1>
+<p class="hint">Calls the FastAPI service at {{ api_url }}/predict</p>
+
+<form method="post">
+  {% for field in fields %}
+    <label for="{{ field }}">{{ field }}</label>
+    <input type="number" step="any" id="{{ field }}" name="{{ field }}" value="{{ values[field] }}" required>
+  {% endfor %}
+  <button type="submit">Predict</button>
+</form>
+
+{% if prediction is not none %}
+  <div class="result">Predicted median house value: <strong>{{ "%.3f"|format(prediction) }}</strong> (in $100,000s)</div>
+{% endif %}
+
+{% if error %}
+  <div class="error">{{ error }}</div>
+{% endif %}

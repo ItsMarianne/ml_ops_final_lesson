@@ -1,0 +1,44 @@
+# Lints and unit-tests the housing_ml package + api on every push/PR.
+#
+# Assumes this directory (housing_mlops) is the root of its own git repo --
+# pyproject.toml/uv.lock live at the repo root, so no working-directory
+# override is needed here (unlike when this lived nested inside a larger
+# monorepo).
+#
+# Deliberately does NOT run the actual training pipeline or spin up
+# docker-compose here: a full GridSearchCV run is too slow/expensive for
+# every CI run, and the unit tests already cover the pure logic (data
+# validation, feature selection, evaluation metrics, the API contract) with
+# mocked/synthetic inputs. Treat a green CI run as "the code is correct",
+# not as "the model trains end-to-end" -- that's still worth checking
+# manually (`make up`) before merging anything that touches the training
+# pipeline or Dockerfiles.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.5.11"
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --extra trainer --extra api --extra dev
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Test
+        run: uv run pytest

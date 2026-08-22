@@ -1,0 +1,95 @@
+services:
+
+  mlflow:                                      # MLflow tracking server + model registry
+    image: inseefrlab/mlflow:v3.14.0
+    user: root                                 # image's default user (uid 1000) can't write to
+                                                # the fresh root-owned named volume below; run as
+                                                # root so it can create/write mlflow.db
+    environment:
+      - MLFLOW_SERVER_ALLOWED_HOSTS=mlflow:5000,localhost:5000
+                                                # mlflow 3.x rejects requests whose Host header
+                                                # isn't in this allowlist (anti DNS-rebinding);
+                                                # "mlflow:5000" is how other containers reach it
+    command:
+      - --host
+      - 0.0.0.0                                # listen on all interfaces (not just localhost)
+      - --port
+      - "5000"                                 # port the mlflow server listens on inside the container
+      - --backend-store-uri
+      - sqlite:////mlflow/mlflow.db            # where run/experiment/registry metadata is stored
+      - --artifacts-destination
+      - /mlflow/artifacts                      # where logged artifacts (models, files) are stored
+      - --serve-artifacts                      # let this server also serve artifact up/downloads
+    volumes:
+      - ./mlflow-data:/mlflow                    # persist the sqlite db + artifacts across restarts
+    ports:
+      - "5000:5000"                            # host:container — browse http://localhost:5000
+    networks:
+      - mlnet
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -f http://localhost:5000 || exit 1"]
+                                                # container is "healthy" once this succeeds
+      interval: 5s                             # check every 5s
+      timeout: 3s                              # give each check 3s to respond
+      retries: 10                              # 10 consecutive failures = unhealthy
+      start_period: 10s                        # grace period before failures start counting
+    restart: unless-stopped                    # long-running service, keep alive across crashes/reboots
+
+  trainer:                                     # one-shot job: trains 3 models, tunes with GridSearchCV,
+                                                # and registers the best one in mlflow
+    build:
+      context: .                               # repo root -- the Dockerfile needs src/, scripts/, config/
+      dockerfile: trainer/Dockerfile
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000 # overrides config/train.yaml's mlflow_tracking_uri
+                                                # so the trainer reaches mlflow by its compose service
+                                                # name regardless of what the yaml file says
+    volumes:
+      - ./data:/app/data:ro                    # read-only mount of the data folder
+      - ./config:/app/config                   # read-write: `make select-features` (run against this
+                                                # service) writes an updated features.yaml back here
+      - ./reports:/app/reports                 # read-write: feature-selection plots land on the host
+    networks:
+      - mlnet
+    depends_on:
+      mlflow:
+        condition: service_healthy             # wait for mlflow's healthcheck to pass before starting
+    restart: "no"                              # batch job: run once, exit, do NOT resurrect
+                                                # (without this, compose would restart the loop forever)
+
+  api:                                          # FastAPI service that serves predictions from the registered model
+    build:
+      context: .                                # repo root -- the Dockerfile needs src/ as well as api/
+      dockerfile: api/Dockerfile
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000  # needed by mlflow.pyfunc.load_model to find the registry
+      - MODEL_ALIAS=prod                         # which registry alias this instance serves (see api/main.py)
+    volumes:
+      - ./config:/app/config:ro                  # read registry_name from the same file the trainer uses
+      - ./logs:/app/logs                         # read-write: served predictions get appended here
+                                                  # (see prediction_log.py) -- the raw material for any
+                                                  # future data-drift check
+    ports:
+      - "8000:8000"                             # host:container — curl/browser → localhost:8000
+    networks:
+      - mlnet
+    depends_on:
+      mlflow:
+        condition: service_healthy               # wait for mlflow to be healthy before loading the model
+    restart: unless-stopped                       # long-running service, keep alive
+
+  webapp:                                          # simple Flask front-end that calls the FastAPI /predict endpoint
+    build: ./webapp                                # self-contained image, no repo-root files needed
+    environment:
+      - API_URL=http://api:8000                    # reach the api service by its compose service name
+    ports:
+      - "5001:5001"                                # host:container — browse http://localhost:5001
+    networks:
+      - mlnet
+    depends_on:
+      - api
+    restart: unless-stopped
+
+networks:
+  mlnet:                                          # private network so services can reach each
+                                                   # other by service name (e.g. http://mlflow:5000)

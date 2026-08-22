@@ -1,0 +1,68 @@
+[project]
+name = "housing-ml"
+version = "0.1.0"
+description = "California housing price regression: training pipeline + serving API"
+requires-python = ">=3.11"
+# Dependencies needed by EVERY component (trainer, api, scripts, tests) go here.
+# Component-specific dependencies live in the [project.optional-dependencies] groups
+# below so a Dockerfile only pulls in what that image actually needs.
+dependencies = [
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "scikit-learn>=1.5",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# `trainer` extra: everything needed to run the training pipeline and the
+# feature-selection analysis script (adds MLflow client + plotting libs).
+trainer = [
+    "mlflow==3.14.0",
+    "matplotlib>=3.9",
+    "seaborn>=0.13",
+]
+# `api` extra: everything needed to serve predictions (adds FastAPI + the
+# MLflow *client* used to pull a model out of the registry at request time).
+api = [
+    "mlflow==3.14.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+]
+# `webapp` extra: the small Flask front-end that calls the FastAPI service
+# over HTTP. It doesn't need mlflow, pandas, or anything else the API/trainer
+# need -- it never touches a model directly, it just sends/receives JSON.
+webapp = [
+    "flask>=3.0",
+    "requests>=2.31",
+]
+# `dev` extra: local/CI-only tooling. Never installed in a production image.
+dev = [
+    "pytest>=8.2",
+    "httpx>=0.27",   # required by fastapi.testclient.TestClient
+    "ruff>=0.6",
+    "requests>=2.31",  # used by scripts/smoke_test.py to hit the running stack
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/housing_ml"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "scripts", "api", "tests"]
+
+[tool.ruff.lint]
+# Pyflakes + pycodestyle errors + import sorting -- a deliberately small,
+# stable ruleset rather than ruff's full opinionated catalog (which includes
+# plugins like flake8-blind-except that would flag the intentional
+# catch-all in api/main.py's /predict handler).
+select = ["E", "F", "I"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "scripts"]
+testpaths = ["tests"]
